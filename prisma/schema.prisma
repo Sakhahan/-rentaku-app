@@ -1,0 +1,879 @@
+// Prisma Schema untuk Platform RentRide
+// Tanggal: 2026-06-20
+// Hubungan relasional lengkap dengan field mapping, trigger, dan PostgreSQL enums.
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ==========================================
+// ENUMS REFERENCE
+// ==========================================
+
+enum UserRole {
+  CUSTOMER
+  OWNER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+  DELETED
+}
+
+enum KycStatus {
+  NOT_SUBMITTED
+  PENDING
+  UNDER_REVIEW
+  VERIFIED
+  REJECTED
+  EXPIRED
+}
+
+enum SimType {
+  SIM_A
+  SIM_B1
+  SIM_B2
+  SIM_C
+  SIM_D
+}
+
+enum VehicleType {
+  CAR
+  MOTORCYCLE
+}
+
+enum VehicleStatus {
+  DRAFT
+  PENDING_REVIEW
+  ACTIVE
+  PAUSED
+  REJECTED
+  DELETED
+}
+
+enum TransmissionType {
+  MANUAL
+  AUTOMATIC
+}
+
+enum FuelType {
+  GASOLINE
+  DIESEL
+  ELECTRIC
+  HYBRID
+}
+
+enum BookingStatus {
+  PENDING_PAYMENT
+  PAYMENT_FAILED
+  CONFIRMED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+  DISPUTED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  EXPIRED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  VIRTUAL_ACCOUNT
+  QRIS
+  CREDIT_CARD
+  GOPAY
+  OVO
+  DANA
+  SHOPEEPAY
+}
+
+enum DepositStatus {
+  HELD
+  RELEASED
+  PARTIALLY_CLAIMED
+  FULLY_CLAIMED
+}
+
+enum DamageStatus {
+  REPORTED
+  UNDER_REVIEW
+  RESOLVED
+  CLOSED
+}
+
+enum HandoverType {
+  PICKUP
+  RETURN
+}
+
+enum ChecklistStatus {
+  GOOD
+  MINOR_DAMAGE
+  MAJOR_DAMAGE
+}
+
+enum AgreementStatus {
+  DRAFT
+  SIGNED_RENTER
+  SIGNED_OWNER
+  FULLY_SIGNED
+  EXPIRED
+}
+
+enum NotifChannel {
+  WHATSAPP
+  EMAIL
+  PUSH
+  IN_APP
+}
+
+enum NotifStatus {
+  PENDING
+  SENT
+  FAILED
+  READ
+}
+
+enum PayoutStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum ReviewTarget {
+  VEHICLE
+  RENTER
+}
+
+enum DisputeStatus {
+  OPEN
+  MEDIATING
+  RESOLVED
+  CLOSED
+}
+
+enum VoucherType {
+  PERCENTAGE
+  FIXED_AMOUNT
+}
+
+enum VoucherStatus {
+  ACTIVE
+  INACTIVE
+  EXPIRED
+  DEPLETED
+}
+
+enum RewardType {
+  EARNED
+  REDEEMED
+  EXPIRED
+  ADJUSTED
+}
+
+// ==========================================
+// MODELS DEFINITIONS
+// ==========================================
+
+model User {
+  id              String       @id @default(cuid())
+  email           String       @unique
+  phone           String       @unique
+  passwordHash    String       @map("password_hash")
+  fullName        String       @map("full_name")
+  avatarUrl       String?      @map("avatar_url")
+  role            UserRole     @default(CUSTOMER)
+  status          UserStatus   @default(ACTIVE)
+  isEmailVerified Boolean      @default(false) @map("is_email_verified")
+  isPhoneVerified Boolean      @default(false) @map("is_phone_verified")
+  referralCode    String       @unique @map("referral_code")
+  referredBy      String?      @map("referred_by")
+  lastLoginAt     DateTime?    @map("last_login_at")
+  deletedAt       DateTime?    @map("deleted_at")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  // Self-relation
+  referrer        User?        @relation("UserReferrals", fields: [referredBy], references: [id], onDelete: Restrict)
+  referrals       User[]       @relation("UserReferrals")
+
+  // Relations
+  kycDocument     KycDocument?
+  ownedVehicles   Vehicle[]    @relation("OwnerVehicles")
+  bookingsAsRenter Booking[]   @relation("RenterBookings")
+  reviewsGiven    Review[]     @relation("ReviewsGiven")
+  reviewsReceived Review[]     @relation("ReviewsReceived")
+  notifications   Notification[]
+  chats           Chat[]
+  wishlists       Wishlist[]
+  rewardPoints    RewardPoint[]
+  payouts         OwnerPayout[]
+  voucherUsages   VoucherUsage[]
+  blacklisted     Blacklist?   @relation("BlacklistedUser")
+  adminBlacklists Blacklist[]  @relation("BannedByAdmin")
+  referralCodes   ReferralCode[]
+  adminLogs       AdminLog[]   @relation("AdminLogs")
+  verifiedKycList KycDocument[] @relation("KycVerifier")
+  approvedVehicles Vehicle[]    @relation("VehicleApprover")
+  damageReportsFiled DamageReport[] @relation("DamageReporter")
+  resolvedDamages   DamageReport[] @relation("DamageResolver")
+  resolvedDeposits  Deposit[]    @relation("DepositResolver")
+  handoverChecklists HandoverChecklist[]
+  vouchersCreated  Voucher[]    @relation("VoucherCreator")
+  settingsUpdated PlatformSetting[]
+
+  @@index([email])
+  @@index([phone])
+  @@index([role])
+  @@index([status])
+  @@index([referralCode])
+  @@map("users")
+}
+
+model KycDocument {
+  id              String      @id @default(cuid())
+  userId          String      @unique @map("user_id")
+  ktpNumber       String      @unique @map("ktp_number")
+  ktpFrontUrl     String      @map("ktp_front_url")
+  ktpBackUrl      String      @map("ktp_back_url")
+  selfieWithKtpUrl String     @map("selfie_with_ktp_url")
+  faceMatchScore  Float?      @map("face_match_score")
+  simType         SimType     @map("sim_type")
+  simNumber       String      @map("sim_number")
+  simUrl          String      @map("sim_url")
+  simExpiryDate   DateTime    @map("sim_expiry_date")
+  status          KycStatus   @default(NOT_SUBMITTED)
+  rejectionReason String?     @map("rejection_reason")
+  verifiedAt      DateTime?   @map("verified_at")
+  verifiedBy      String?     @map("verified_by")
+  resubmittedAt   DateTime?   @map("resubmitted_at")
+  expiresAt       DateTime?   @map("expires_at")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  verifier        User?       @relation("KycVerifier", fields: [verifiedBy], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([status])
+  @@index([ktpNumber])
+  @@map("kyc_documents")
+}
+
+model Vehicle {
+  id                 String                     @id @default(cuid())
+  ownerId            String                     @map("owner_id")
+  type               VehicleType
+  brand              String
+  model              String
+  year               Int
+  color              String
+  licensePlate       String                     @unique @map("license_plate")
+  transmission       TransmissionType
+  fuelType           FuelType                   @map("fuel_type")
+  seatCapacity       Int                        @map("seat_capacity")
+  engineCC           Int                        @map("engine_cc")
+  description        String                     @db.Text
+  dailyRate          Decimal                    @map("daily_rate") @db.Decimal(10, 2)
+  weekendRate        Decimal?                   @map("weekend_rate") @db.Decimal(10, 2)
+  weeklyDiscount     Float?                     @map("weekly_discount")
+  monthlyDiscount    Float?                     @map("monthly_discount")
+  includesDriver     Boolean                    @default(false) @map("includes_driver")
+  driverDailyRate    Decimal?                   @map("driver_daily_rate") @db.Decimal(10, 2)
+  dailyKmLimit       Int?                       @map("daily_km_limit")
+  canGoOutOfCity     Boolean                    @default(false) @map("can_go_out_of_city")
+  pickupAddress      String                     @map("pickup_address")
+  pickupLatitude     Float                      @map("pickup_latitude")
+  pickupLongitude    Float                      @map("pickup_longitude")
+  deliveryAvailable  Boolean                    @default(false) @map("delivery_available")
+  deliveryRadiusKm   Int?                       @map("delivery_radius_km")
+  deliveryCostPerKm  Decimal?                   @map("delivery_cost_per_km") @db.Decimal(10, 2)
+  status             VehicleStatus              @default(DRAFT)
+  isInstantBook      Boolean                    @default(true) @map("is_instant_book")
+  isFeatured         Boolean                    @default(false) @map("is_featured")
+  totalTrips         Int                        @default(0) @map("total_trips")
+  averageRating      Float                      @default(0) @map("average_rating")
+  totalReviews       Int                        @default(0) @map("total_reviews")
+  rejectionReason    String?                    @map("rejection_reason")
+  approvedBy         String?                    @map("approved_by")
+  approvedAt         DateTime?                  @map("approved_at")
+  deletedAt          DateTime?                  @map("deleted_at")
+  createdAt          DateTime                   @default(now()) @map("created_at")
+  updatedAt          DateTime                   @updatedAt @map("updated_at")
+
+  // Relations
+  owner              User                       @relation("OwnerVehicles", fields: [ownerId], references: [id], onDelete: Restrict)
+  approver           User?                      @relation("VehicleApprover", fields: [approvedBy], references: [id], onDelete: SetNull)
+  photos             VehiclePhoto[]
+  features           VehicleFeature[]
+  availabilityBlocks VehicleAvailabilityBlock[]
+  rules              VehicleRule?
+  bookings           Booking[]
+  reviews            Review[]
+  wishlists          Wishlist[]
+  gpsTracker         GpsTracker?
+
+  @@index([ownerId])
+  @@index([type])
+  @@index([status])
+  @@index([isInstantBook])
+  @@index([isFeatured])
+  @@index([dailyRate])
+  @@index([averageRating])
+  @@index([pickupLatitude, pickupLongitude])
+  @@map("vehicles")
+}
+
+model VehiclePhoto {
+  id        String   @id @default(cuid())
+  vehicleId String   @map("vehicle_id")
+  url       String
+  caption   String?
+  angle     String   // front/back/left/right/interior/odometer/other
+  isPrimary Boolean  @default(false) @map("is_primary")
+  order     Int
+  createdAt DateTime @default(now()) @map("created_at")
+
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId])
+  @@index([isPrimary])
+  @@map("vehicle_photos")
+}
+
+model VehicleFeature {
+  id          String   @id @default(cuid())
+  vehicleId   String   @map("vehicle_id")
+  name        String   // AC/GPS/Dashcam/ChildSeat/Bluetooth/MusicSystem/Sunroof/BackCamera/dll
+  isAvailable Boolean  @default(true) @map("is_available")
+
+  vehicle     Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId])
+  @@map("vehicle_features")
+}
+
+model VehicleAvailabilityBlock {
+  id        String   @id @default(cuid())
+  vehicleId String   @map("vehicle_id")
+  startDate DateTime @map("start_date")
+  endDate   DateTime @map("end_date")
+  reason    String   // BOOKED/OWNER_BLOCK/MAINTENANCE
+  bookingId String?  @unique @map("booking_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  @@index([vehicleId])
+  @@index([startDate, endDate])
+  @@map("vehicle_availability_blocks")
+}
+
+model VehicleRule {
+  id                 String   @id @default(cuid())
+  vehicleId          String   @unique @map("vehicle_id")
+  noSmoking          Boolean  @default(true) @map("no_smoking")
+  noPets             Boolean  @default(false) @map("no_pets")
+  maxPassengers      Int      @map("max_passengers")
+  requireFullTank    Boolean  @default(true) @map("require_full_tank")
+  additionalRules    String?  @map("additional_rules") @db.Text
+  cancellationPolicy String   @map("cancellation_policy") // FLEXIBLE/MODERATE/STRICT
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  vehicle            Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@map("vehicle_rules")
+}
+
+model Booking {
+  id                 String                     @id @default(cuid())
+  bookingCode        String                     @unique @map("booking_code")
+  renterId           String                     @map("renter_id")
+  vehicleId          String                     @map("vehicle_id")
+  startDate          DateTime                   @map("start_date")
+  endDate            DateTime                   @map("end_date")
+  totalDays          Int                        @map("total_days")
+  withDriver         Boolean                    @default(false) @map("with_driver")
+  pickupMethod       String                     @map("pickup_method") // SELF_PICKUP/DELIVERY
+  deliveryAddress    String?                    @map("delivery_address")
+  deliveryLatitude   Float?                     @map("delivery_latitude")
+  deliveryLongitude  Float?                     @map("delivery_longitude")
+  deliveryCost       Decimal                    @default(0) @map("delivery_cost") @db.Decimal(10, 2)
+  baseAmount         Decimal                    @map("base_amount") @db.Decimal(10, 2)
+  addonAmount        Decimal                    @default(0) @map("addon_amount") @db.Decimal(10, 2)
+  discountAmount     Decimal                    @default(0) @map("discount_amount") @db.Decimal(10, 2)
+  platformFee        Decimal                    @map("platform_fee") @db.Decimal(10, 2)
+  depositAmount      Decimal                    @map("deposit_amount") @db.Decimal(10, 2)
+  totalAmount        Decimal                    @map("total_amount") @db.Decimal(10, 2)
+  voucherCode        String?                    @map("voucher_code")
+  status             BookingStatus              @default(PENDING_PAYMENT)
+  cancellationReason String?                    @map("cancellation_reason")
+  cancelledBy        String?                    @map("cancelled_by")
+  cancelledAt        DateTime?                  @map("cancelled_at")
+  confirmedAt        DateTime?                  @map("confirmed_at")
+  startedAt          DateTime?                  @map("started_at")
+  completedAt        DateTime?                  @map("completed_at")
+  ownerNotes         String?                    @map("owner_notes") @db.Text
+  renterNotes        String?                    @map("renter_notes") @db.Text
+  deletedAt          DateTime?                  @map("deleted_at")
+  createdAt          DateTime                   @default(now()) @map("created_at")
+  updatedAt          DateTime                   @updatedAt @map("updated_at")
+
+  // Relations
+  renter             User                       @relation("RenterBookings", fields: [renterId], references: [id], onDelete: Restrict)
+  vehicle            Vehicle                    @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  addons             BookingAddon[]
+  emergencyContacts  EmergencyContact[]
+  payment            Payment?
+  deposit            Deposit?
+  agreement          RentalAgreement?
+  handovers          HandoverChecklist[]
+  checkinLogs        CheckinLog[]
+  damageReport       DamageReport?
+  review             Review?
+  chats              Chat[]
+  availabilityBlock  VehicleAvailabilityBlock?
+  voucherUsages      VoucherUsage[]
+  ownerPayouts       OwnerPayout[]
+  rewardPoints       RewardPoint[]
+
+  @@index([bookingCode])
+  @@index([renterId])
+  @@index([vehicleId])
+  @@index([status])
+  @@index([startDate, endDate])
+  @@index([createdAt])
+  @@map("bookings")
+}
+
+model BookingAddon {
+  id          String   @id @default(cuid())
+  bookingId   String   @map("booking_id")
+  name        String   // DRIVER/CHILD_SEAT/EXTRA_INSURANCE/GPS_DEVICE/FULL_TANK
+  pricePerDay Decimal  @map("price_per_day") @db.Decimal(10, 2)
+  totalPrice  Decimal  @map("total_price") @db.Decimal(10, 2)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  booking     Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@map("booking_addons")
+}
+
+model EmergencyContact {
+  id           String   @id @default(cuid())
+  bookingId    String   @map("booking_id")
+  name         String
+  phone        String
+  relationship String   // FAMILY/SPOUSE/FRIEND/COLLEAGUE
+  order        Int      // 1 atau 2
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  booking      Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@map("emergency_contacts")
+}
+
+model Payment {
+  id                    String        @id @default(cuid())
+  bookingId             String        @unique @map("booking_id")
+  midtransOrderId       String        @unique @map("midtrans_order_id")
+  midtransTransactionId String?       @map("midtrans_transaction_id")
+  amount                Decimal       @db.Decimal(10, 2)
+  method                PaymentMethod?
+  status                PaymentStatus @default(PENDING)
+  snapToken             String?       @map("snap_token")
+  paymentUrl            String?       @map("payment_url")
+  paidAt                DateTime?     @map("paid_at")
+  expiredAt             DateTime      @map("expired_at")
+  midtransResponse      Json?         @map("midtrans_response")
+  createdAt             DateTime      @default(now()) @map("created_at")
+  updatedAt             DateTime      @updatedAt @map("updated_at")
+
+  booking               Booking       @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+
+  @@index([bookingId])
+  @@index([midtransOrderId])
+  @@index([status])
+  @@map("payments")
+}
+
+model Deposit {
+  id            String        @id @default(cuid())
+  bookingId     String        @unique @map("booking_id")
+  amount        Decimal       @db.Decimal(10, 2)
+  status        DepositStatus @default(HELD)
+  heldAt        DateTime?     @map("held_at")
+  releasedAt    DateTime?     @map("released_at")
+  claimedAmount Decimal       @default(0) @map("claimed_amount") @db.Decimal(10, 2)
+  claimReason   String?       @map("claim_reason")
+  resolvedBy    String?       @map("resolved_by")
+  resolvedAt    DateTime?     @map("resolved_at")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  booking       Booking       @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  resolver      User?         @relation("DepositResolver", fields: [resolvedBy], references: [id], onDelete: SetNull)
+
+  @@map("deposits")
+}
+
+model RentalAgreement {
+  id              String          @id @default(cuid())
+  bookingId       String          @unique @map("booking_id")
+  pdfUrl          String?         @map("pdf_url")
+  status          AgreementStatus @default(DRAFT)
+  renterSignature String?         @map("renter_signature") @db.Text
+  renterSignedAt  DateTime?       @map("renter_signed_at")
+  ownerSignature  String?         @map("owner_signature") @db.Text
+  ownerSignedAt   DateTime?       @map("owner_signed_at")
+  agreementContent String         @map("agreement_content") @db.Text
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  booking         Booking         @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@map("rental_agreements")
+}
+
+model HandoverChecklist {
+  id                String          @id @default(cuid())
+  bookingId         String          @map("booking_id")
+  type              HandoverType
+  conductedBy       String          @map("conducted_by")
+  fuelLevel         Int             @map("fuel_level") // 0-100 percentage
+  odometerKm        Int             @map("odometer_km")
+  bodyCondition     ChecklistStatus @map("body_condition")
+  interiorCondition ChecklistStatus @map("interior_condition")
+  tiresCondition    ChecklistStatus @map("tires_condition")
+  engineCondition   ChecklistStatus @map("engine_condition")
+  lightsCondition   ChecklistStatus @map("lights_condition")
+  documentsComplete Boolean         @default(true) @map("documents_complete")
+  notes             String?         @db.Text
+  renterSignature   String?         @map("renter_signature") @db.Text
+  ownerSignature    String?         @map("owner_signature") @db.Text
+  qrCodeScannedAt   DateTime?       @map("qr_code_scanned_at")
+  conductedAt       DateTime        @map("conducted_at")
+  createdAt         DateTime        @default(now()) @map("created_at")
+
+  booking           Booking         @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  inspector         User            @relation(fields: [conductedBy], references: [id], onDelete: Restrict)
+  photos            HandoverPhoto[]
+
+  @@index([bookingId])
+  @@index([type])
+  @@map("handover_checklists")
+}
+
+model HandoverPhoto {
+  id          String   @id @default(cuid())
+  checklistId String   @map("checklist_id")
+  url         String
+  angle       String   // front/back/left/right/interior/odometer
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  checklist   HandoverChecklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+
+  @@map("handover_photos")
+}
+
+model CheckinLog {
+  id          String   @id @default(cuid())
+  bookingId   String   @map("booking_id")
+  selfieUrl   String   @map("selfie_url")
+  latitude    Float?
+  longitude   Float?
+  isLate      Boolean  @default(false) @map("is_late")
+  dueAt       DateTime @map("due_at")
+  submittedAt DateTime @map("submitted_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  booking     Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId])
+  @@map("checkin_logs")
+}
+
+model DamageReport {
+  id            String       @id @default(cuid())
+  bookingId     String       @unique @map("booking_id")
+  reportedBy    String       @map("reported_by")
+  description   String       @db.Text
+  estimatedCost Decimal?     @map("estimated_cost") @db.Decimal(10, 2)
+  finalCost     Decimal?     @map("final_cost") @db.Decimal(10, 2)
+  status        DamageStatus @default(REPORTED)
+  adminNotes    String?      @map("admin_notes") @db.Text
+  resolvedBy    String?      @map("resolved_by")
+  resolvedAt    DateTime?    @map("resolved_at")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  booking       Booking      @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  reporter      User         @relation("DamageReporter", fields: [reportedBy], references: [id], onDelete: Restrict)
+  resolver      User?        @relation("DamageResolver", fields: [resolvedBy], references: [id], onDelete: SetNull)
+  photos        DamagePhoto[]
+
+  @@map("damage_reports")
+}
+
+model DamagePhoto {
+  id             String       @id @default(cuid())
+  damageReportId String       @map("damage_report_id")
+  url            String
+  description    String?
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  damageReport   DamageReport @relation(fields: [damageReportId], references: [id], onDelete: Cascade)
+
+  @@map("damage_photos")
+}
+
+model Review {
+  id                 String       @id @default(cuid())
+  bookingId          String       @unique @map("booking_id")
+  reviewerId         String       @map("reviewer_id")
+  targetId           String?      @map("target_id")
+  vehicleId          String?      @map("vehicle_id")
+  target             ReviewTarget
+  cleanlinessRating  Int          @map("cleanliness_rating") // 1-5
+  accuracyRating     Int          @map("accuracy_rating")    // 1-5
+  communicationRating Int          @map("communication_rating") // 1-5
+  valueRating        Int          @map("value_rating")       // 1-5
+  overallRating      Float        @map("overall_rating")     // computed average
+  comment            String       @db.Text
+  isPublished        Boolean      @default(false) @map("is_published")
+  publishedAt        DateTime?    @map("published_at")
+  reply              String?      @db.Text
+  repliedAt          DateTime?    @map("replied_at")
+  createdAt          DateTime     @default(now()) @map("created_at")
+  updatedAt          DateTime     @updatedAt @map("updated_at")
+
+  booking            Booking      @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  reviewer           User         @relation("ReviewsGiven", fields: [reviewerId], references: [id], onDelete: Restrict)
+  targetUser         User?        @relation("ReviewsReceived", fields: [targetId], references: [id], onDelete: SetNull)
+  vehicle            Vehicle?     @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+
+  @@index([bookingId])
+  @@index([reviewerId])
+  @@index([targetId])
+  @@index([vehicleId])
+  @@index([isPublished])
+  @@map("reviews")
+}
+
+// --- TABEL PENDUKUNG TAMBAHAN ---
+
+model Notification {
+  id           String        @id @default(cuid())
+  userId       String        @map("user_id")
+  bookingId    String?       @map("booking_id")
+  channel      NotifChannel
+  title        String
+  message      String        @db.Text
+  status       NotifStatus   @default(PENDING)
+  readAt       DateTime?     @map("read_at")
+  templateName String?       @map("template_name")
+  metadata     Json?
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model Chat {
+  id          String    @id @default(cuid())
+  bookingId   String    @map("booking_id")
+  senderId    String    @map("sender_id")
+  message     String    @db.Text
+  imageUrl    String?   @map("image_url")
+  isRead      Boolean   @default(false) @map("is_read")
+  readAt      DateTime? @map("read_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  booking     Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  sender      User      @relation(fields: [senderId], references: [id], onDelete: Restrict)
+
+  @@map("chats")
+}
+
+model Wishlist {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  vehicleId String   @map("vehicle_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, vehicleId])
+  @@map("wishlists")
+}
+
+model Voucher {
+  id                String        @id @default(cuid())
+  code              String        @unique
+  type              VoucherType
+  value             Decimal       @db.Decimal(10, 2)
+  minBookingAmount  Decimal?      @map("min_booking_amount") @db.Decimal(10, 2)
+  maxDiscountAmount Decimal?      @map("max_discount_amount") @db.Decimal(10, 2)
+  usageLimit        Int?          @map("usage_limit")
+  usageCount        Int           @default(0) @map("usage_count")
+  validFrom         DateTime      @map("valid_from")
+  validUntil         DateTime      @map("valid_until")
+  status            VoucherStatus
+  createdBy         String        @map("created_by")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  creator           User          @relation("VoucherCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  usages            VoucherUsage[]
+
+  @@map("vouchers")
+}
+
+model VoucherUsage {
+  id             String   @id @default(cuid())
+  voucherId      String   @map("voucher_id")
+  userId         String   @map("user_id")
+  bookingId      String   @map("booking_id")
+  discountAmount Decimal  @map("discount_amount") @db.Decimal(10, 2)
+  usedAt         DateTime @default(now()) @map("used_at")
+
+  voucher        Voucher  @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  user           User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  booking        Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@map("voucher_usages")
+}
+
+model Blacklist {
+  id              String   @id @default(cuid())
+  userId          String?  @unique @map("user_id")
+  reason          String   @db.Text
+  bannedBy        String   @map("banned_by")
+  bannedAt        DateTime @map("banned_at")
+  notes           String?  @db.Text
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user            User?    @relation("BlacklistedUser", fields: [userId], references: [id], onDelete: Cascade)
+  admin           User     @relation("BannedByAdmin", fields: [bannedBy], references: [id], onDelete: Restrict)
+
+  @@map("blacklist")
+}
+
+model ReferralCode {
+  id           String   @id @default(cuid())
+  code         String   @unique
+  ownerId      String   @map("owner_id")
+  rewardAmount Decimal  @map("reward_amount") @db.Decimal(10, 2)
+  usageCount   Int      @default(0) @map("usage_count")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  owner        User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@map("referral_codes")
+}
+
+model RewardPoint {
+  id          String     @id @default(cuid())
+  userId      String     @map("user_id")
+  bookingId   String?    @map("booking_id")
+  type        RewardType
+  points      Int
+  description String     @db.Text
+  expiresAt   DateTime?  @map("expires_at")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  booking     Booking?   @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  @@map("reward_points")
+}
+
+model OwnerPayout {
+  id                 String       @id @default(cuid())
+  ownerId            String       @map("owner_id")
+  bookingId          String       @map("booking_id")
+  grossAmount        Decimal      @map("gross_amount") @db.Decimal(10, 2)
+  platformCommission Decimal      @map("platform_commission") @db.Decimal(10, 2)
+  netAmount          Decimal      @map("net_amount") @db.Decimal(10, 2)
+  bankName           String       @map("bank_name")
+  accountNumber      String       @map("account_number")
+  accountName        String       @map("account_name")
+  status             PayoutStatus
+  processedAt        DateTime?    @map("processed_at")
+  transferRef        String?      @map("transfer_ref")
+  notes              String?      @map("notes") @db.Text
+  createdAt          DateTime     @default(now()) @map("created_at")
+  updatedAt          DateTime     @updatedAt @map("updated_at")
+
+  owner              User         @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  booking            Booking      @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+
+  @@map("owner_payouts")
+}
+
+model GpsTracker {
+  id            String    @id @default(cuid())
+  vehicleId     String    @unique @map("vehicle_id")
+  deviceId      String    @unique @map("device_id")
+  deviceName    String    @map("device_name")
+  lastLatitude  Float?    @map("last_latitude")
+  lastLongitude Float?    @map("last_longitude")
+  lastUpdatedAt DateTime? @map("last_updated_at")
+  isActive      Boolean   @default(true) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  vehicle       Vehicle   @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@map("gps_trackers")
+}
+
+model AdminLog {
+  id          String   @id @default(cuid())
+  adminId     String   @map("admin_id")
+  action      String
+  targetType  String   @map("target_type")
+  targetId    String   @map("target_id")
+  description String   @db.Text
+  metadata    Json?
+  ipAddress   String?  @map("ip_address")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  admin       User     @relation("AdminLogs", fields: [adminId], references: [id], onDelete: Restrict)
+
+  @@map("admin_logs")
+}
+
+model PlatformSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String   @db.Text
+  description String?  @db.Text
+  updatedBy   String   @map("updated_by")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user        User     @relation(fields: [updatedBy], references: [id], onDelete: Restrict)
+
+  @@map("platform_settings")
+}
